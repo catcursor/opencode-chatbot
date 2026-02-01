@@ -5,8 +5,9 @@ Telegram Bot：将用户消息转发给 OpenCode，仅把最终结果回复给�
 from __future__ import annotations
 
 import json
-import os
 import logging
+import os
+from io import BytesIO
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
@@ -81,6 +82,14 @@ async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(text)
 
 
+async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    content, filename = await bot_core.handle_export_session()
+    if content is not None:
+        await update.message.reply_document(document=BytesIO(content), filename=filename)
+    else:
+        await update.message.reply_text(filename)
+
+
 async def cmd_opencode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = bot_core.handle_opencode_status()
     keyboard = None
@@ -110,8 +119,12 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     text = update.message.text.strip()
     if not text:
         return
-    await update.message.reply_text("已收到，正在执行…")
+    received_msg = await update.message.reply_text("已收到，正在执行…")
     result = await bot_core.handle_message(text)
+    try:
+        await received_msg.delete()
+    except Exception:
+        pass
     for chunk in bot_core.chunk_text(result):
         await update.message.reply_text(chunk)
 
@@ -129,6 +142,7 @@ def run_telegram(config: dict) -> None:
         BotCommand("start", "欢迎与说明"),
         BotCommand("session", "查看会话列表"),
         BotCommand("new", "新建会话"),
+        BotCommand("export", "导出当前会话为 .md 文件"),
         BotCommand("opencode", "查看并启动 OpenCode"),
     ]
 
@@ -141,6 +155,7 @@ def run_telegram(config: dict) -> None:
     app.add_handler(CommandHandler("session", cmd_session, filters=allow))
     app.add_handler(CommandHandler("sessions", cmd_session, filters=allow))
     app.add_handler(CommandHandler("new", cmd_new, filters=allow))
+    app.add_handler(CommandHandler("export", cmd_export, filters=allow))
     app.add_handler(CommandHandler("opencode", cmd_opencode, filters=allow))
     app.add_handler(CallbackQueryHandler(on_switch_session, pattern=rf"^{CALLBACK_PREFIX_USE}"))
     app.add_handler(CallbackQueryHandler(on_start_opencode, pattern=rf"^{CALLBACK_START_OPENCODE}$"))

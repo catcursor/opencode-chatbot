@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 
+import httpx
 import opencode_client as opencode
 import opencode_runner as runner
 
@@ -15,7 +16,14 @@ current_session_id: str | None = None
 async def get_or_create_session() -> str:
     global current_session_id
     if current_session_id:
-        return current_session_id
+        try:
+            sessions = await opencode.list_sessions()
+            ids = [s.get("id") for s in (sessions or []) if s.get("id")]
+            if current_session_id in ids:
+                return current_session_id
+        except Exception:
+            pass
+        current_session_id = None
     sessions = await opencode.list_sessions()
     if not sessions:
         session = await opencode.create_session()
@@ -41,6 +49,37 @@ def chunk_text(text: str, size: int = MAX_MESSAGE_LENGTH) -> list[str]:
 
 async def get_sessions() -> list[dict]:
     return await opencode.list_sessions()
+
+
+def _format_session_messages(messages: list) -> str:
+    """将 session 消息列表格式化为 Markdown（用于导出 .md 文件）。"""
+    blocks = []
+    for i, msg in enumerate(messages or []):
+        parts = msg.get("parts") or []
+        blocks.append(f"## Message {i + 1}\n")
+        for p in parts:
+            if p.get("type") == "text" and "text" in p:
+                text = (p.get("text") or "").strip()
+                if text:
+                    blocks.append(text)
+                    blocks.append("")
+        blocks.append("")
+    return "\n".join(blocks).strip() or "(无内容)"
+
+
+async def handle_export_session() -> tuple[bytes | None, str]:
+    """
+    获取当前 session 全部内容并格式化为 Markdown 文件。
+    返回 (content_bytes, filename) 成功；(None, error_message) 失败。
+    """
+    try:
+        session_id = await get_or_create_session()
+        messages = await opencode.get_session_messages(session_id, limit=500)
+        text = _format_session_messages(messages)
+        filename = f"session_{session_id[:8]}.md"
+        return (text.encode("utf-8"), filename)
+    except Exception as e:
+        return (None, f"导出失败: {e}")
 
 
 def handle_start() -> str:
@@ -121,6 +160,21 @@ async def handle_message(text: str) -> str:
     try:
         session_id = await get_or_create_session()
         result = await opencode.send_message(session_id, text)
+    except httpx.TimeoutException:
+        return "请求超时（OpenCode 可能仍在执行），可稍后重试或发 /session 查看。可设置环境变量 OPENCODE_MESSAGE_TIMEOUT（秒）增大超时。"
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            global current_session_id
+            current_session_id = None
+            try:
+                session_id = await get_or_create_session()
+                result = await opencode.send_message(session_id, text)
+            except Exception as retry_e:
+                return f"调用 OpenCode 失败: {retry_e}"
+            if not result:
+                return "(无文本结果)"
+            return result
+        return f"调用 OpenCode 失败: {e}"
     except Exception as e:
         return f"调用 OpenCode 失败: {e}"
     if not result:

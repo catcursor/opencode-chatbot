@@ -22,11 +22,14 @@ python main.py
 
 需先启动 `opencode serve`（默认 `http://127.0.0.1:4096`），或发送 `/opencode` 点「启动 OpenCode」。
 
+**长任务超时**：发消息给 OpenCode 时，默认等待 10 分钟；超时后提示「请求超时（OpenCode 可能仍在执行）」。可设置环境变量 `OPENCODE_MESSAGE_TIMEOUT`（秒）增大超时；或设置 `OPENCODE_USE_ASYNC=1` 使用异步提交+轮询，避免单次长连接超时。
+
 ## 命令
 
 - `/start` 说明
 - `/session` 会话列表（Telegram 可点按钮切换；Matrix 用 `/use <session_id>` 切换）
 - `/new` 新建会话
+- `/export` 导出当前会话全部内容为 .md 文件
 - `/opencode` 查看/启动 OpenCode
 - `/use <session_id>`（Matrix）切换当前会话
 

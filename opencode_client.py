@@ -1,16 +1,29 @@
 """
 OpenCode HTTP 客户端：健康检查、会话列表/创建、发消息。
 解析 POST /session/:id/message 响应时只提取最终结果（最后一条 text part）。
+支持 OPENCODE_USE_ASYNC=1 时用 prompt_async + 轮询，避免长任务单次 HTTP 超时。
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import time
 from typing import Optional, Tuple
 
 import httpx
 
 DEFAULT_BASE_URL = "http://127.0.0.1:4096"
-MESSAGE_TIMEOUT = 300.0
+
+
+def _message_timeout() -> float:
+    """可配置：环境变量 OPENCODE_MESSAGE_TIMEOUT（秒），默认 600（10 分钟）。"""
+    try:
+        t = os.environ.get("OPENCODE_MESSAGE_TIMEOUT", "")
+        if t:
+            return max(60.0, float(t))
+    except ValueError:
+        pass
+    return 600.0
 
 
 def _auth() -> Optional[Tuple[str, str]]:
@@ -64,12 +77,59 @@ async def create_session(title: Optional[str] = None) -> dict:
         return r.json()
 
 
+async def _get_messages(session_id: str, limit: int = 5) -> list:
+    """GET /session/:id/message?limit=N"""
+    async with httpx.AsyncClient(
+        base_url=_get_base_url(), auth=_auth(), timeout=15.0
+    ) as client:
+        r = await client.get(f"/session/{session_id}/message", params={"limit": limit})
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_session_messages(session_id: str, limit: int = 500) -> list:
+    """GET /session/:id/message?limit=N，获取当前会话所有消息（用于导出）。"""
+    return await _get_messages(session_id, limit=limit)
+
+
+async def send_message_async_poll(session_id: str, text: str) -> str:
+    """
+    POST /session/:id/prompt_async 提交后轮询 GET message，避免单次长连接超时。
+    总等待时间受 OPENCODE_MESSAGE_TIMEOUT 限制，轮询间隔 3 秒。
+    """
+    timeout = _message_timeout()
+    async with httpx.AsyncClient(
+        base_url=_get_base_url(), auth=_auth(), timeout=15.0
+    ) as client:
+        r = await client.post(
+            f"/session/{session_id}/prompt_async",
+            json={"parts": [{"type": "text", "text": text}]},
+        )
+        r.raise_for_status()
+    n_before = len(await _get_messages(session_id, limit=10))
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        await asyncio.sleep(3)
+        messages = await _get_messages(session_id, limit=10)
+        if len(messages) > n_before:
+            last = messages[-1]
+            result = _extract_final_result(last)
+            if result:
+                return result
+    raise httpx.TimeoutException("轮询等待结果超时")
+
+
 async def send_message(session_id: str, text: str) -> str:
     """
     POST /session/:id/message，只返回解析出的最终结果（最后一条 text part）。
+    若 OPENCODE_USE_ASYNC=1 则改用 prompt_async + 轮询，适合长任务。
+    长任务可能超时；可设置 OPENCODE_MESSAGE_TIMEOUT（秒）增大超时。
     """
+    if os.environ.get("OPENCODE_USE_ASYNC", "").strip() in ("1", "true", "yes"):
+        return await send_message_async_poll(session_id, text)
+    timeout = _message_timeout()
     async with httpx.AsyncClient(
-        base_url=_get_base_url(), auth=_auth(), timeout=MESSAGE_TIMEOUT
+        base_url=_get_base_url(), auth=_auth(), timeout=timeout
     ) as client:
         r = await client.post(
             f"/session/{session_id}/message",

@@ -5,6 +5,7 @@ Matrix Bot：通过 matrix-nio 连接 Matrix，支持 E2EE；将用户消息转�
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import os
@@ -70,7 +71,13 @@ async def _run_matrix(
 ) -> None:
     from nio import AsyncClient, AsyncClientConfig, MegolmEvent, RoomMessageText, SyncResponse
     from nio.exceptions import LocalProtocolError
-    from nio.responses import DeleteDevicesAuthResponse, DeleteDevicesResponse, DevicesResponse
+    from nio.responses import (
+        DeleteDevicesAuthResponse,
+        DeleteDevicesResponse,
+        DevicesResponse,
+        RoomSendResponse,
+        UploadResponse,
+    )
     from nio.store import SqliteStore
 
     os.makedirs(STORE_PATH, exist_ok=True)
@@ -92,6 +99,24 @@ async def _run_matrix(
                 content={"msgtype": "m.notice", "body": chunk},
                 ignore_unverified_devices=True,
             )
+
+    async def send_file(room_id: str, content: bytes, filename: str) -> bool:
+        content_type = "text/markdown; charset=utf-8" if filename.endswith(".md") else "text/plain; charset=utf-8"
+        resp, _ = await client.upload(io.BytesIO(content), content_type=content_type, filename=filename)
+        if not isinstance(resp, UploadResponse):
+            return False
+        await client.room_send(
+            room_id,
+            message_type="m.room.message",
+            content={
+                "msgtype": "m.file",
+                "body": filename,
+                "url": resp.content_uri,
+                "info": {"mimetype": content_type.split(";")[0], "size": len(content)},
+            },
+            ignore_unverified_devices=True,
+        )
+        return True
 
     async def on_message(room, event):
         try:
@@ -121,6 +146,15 @@ async def _run_matrix(
                 text = await bot_core.handle_new_session()
                 await send_text(room.room_id, text)
                 return
+            if body == "/export":
+                content, filename = await bot_core.handle_export_session()
+                if content is not None:
+                    ok = await send_file(room.room_id, content, filename)
+                    if not ok:
+                        await send_text(room.room_id, "上传文件失败")
+                else:
+                    await send_text(room.room_id, filename)
+                return
             if body == "/opencode":
                 text = bot_core.handle_opencode_status()
                 if not bot_core.is_opencode_healthy():
@@ -135,8 +169,21 @@ async def _run_matrix(
                 await send_text(room.room_id, text)
                 return
 
-            await send_text(room.room_id, "已收到，正在执行…")
+            pending_redact = None
+            resp = await client.room_send(
+                room.room_id,
+                message_type="m.room.message",
+                content={"msgtype": "m.notice", "body": "已收到，正在执行…"},
+                ignore_unverified_devices=True,
+            )
+            if isinstance(resp, RoomSendResponse):
+                pending_redact = (room.room_id, resp.event_id)
             result = await bot_core.handle_message(body)
+            if pending_redact:
+                try:
+                    await client.room_redact(pending_redact[0], pending_redact[1])
+                except Exception:
+                    pass
             await send_text(room.room_id, result)
         except Exception as e:
             logger.exception("处理 Matrix 消息失败: %s", e)

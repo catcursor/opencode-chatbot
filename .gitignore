@@ -1,0 +1,6 @@
+# Python / 运行时
+__pycache__/
+*.pyc
+*.log
+*.json
+matrix_store/

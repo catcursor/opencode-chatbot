@@ -30,6 +30,7 @@ python main.py
 - `/session` 会话列表（Telegram 可点按钮切换；Matrix 用 `/use <session_id>` 切换）
 - `/new` 新建会话
 - `/export` 导出当前会话全部内容为 .md 文件
+- `/restart` 重启 OpenCode（终止进程后重新启动）
 - `/opencode` 查看/启动 OpenCode
 - `/use <session_id>`（Matrix）切换当前会话
 

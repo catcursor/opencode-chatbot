@@ -144,6 +144,50 @@ def start_opencode(
     return True, f"已启动 opencode serve (pid={p.pid}, {hostname}:{port})"
 
 
+def _kill_port_process(port: int) -> bool:
+    """终止占用端口的进程。返回是否成功终止。"""
+    in_use, pid, _ = check_port(port)
+    if not in_use or not pid:
+        return True
+    try:
+        os.kill(pid, 15)
+        for _ in range(10):
+            time.sleep(0.5)
+            in_use2, _, _ = check_port(port)
+            if not in_use2:
+                return True
+        os.kill(pid, 9)
+        time.sleep(0.5)
+        return True
+    except ProcessLookupError:
+        return True
+    except Exception:
+        return False
+
+
+def restart_opencode(
+    port: Optional[int] = None,
+    log_path: Optional[str] = None,
+) -> tuple[bool, str]:
+    """
+    终止当前 OpenCode 进程并重新启动。返回 (是否成功, 说明)。
+    """
+    port = port or _parse_port_from_base_url(get_base_url())
+    if port == 80:
+        port = DEFAULT_PORT
+    if not _kill_port_process(port):
+        return False, f"无法终止端口 {port} 上的进程"
+    time.sleep(1)
+    ok, msg = start_opencode(port=port, log_path=log_path)
+    if not ok:
+        return False, msg
+    for _ in range(15):
+        time.sleep(1)
+        if is_opencode_healthy():
+            return True, f"已重启 OpenCode: {msg}"
+    return False, f"已启动但健康检查未通过: {msg}"
+
+
 def ensure_opencode_running(
     port: Optional[int] = None,
     log_path: Optional[str] = None,

@@ -142,6 +142,11 @@ def handle_start_opencode(log_path: str) -> tuple[bool, str]:
     return runner.ensure_opencode_running(log_path=log_path)
 
 
+def handle_restart_opencode(log_path: str) -> tuple[bool, str]:
+    """终止当前 OpenCode 进程并重新启动。"""
+    return runner.restart_opencode(log_path=log_path)
+
+
 async def handle_switch_session(session_id: str) -> str:
     try:
         sessions = await opencode.list_sessions()

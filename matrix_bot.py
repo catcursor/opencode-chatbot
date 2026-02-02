@@ -155,6 +155,11 @@ async def _run_matrix(
                 else:
                     await send_text(room.room_id, filename)
                 return
+            if body == "/restart":
+                log_path = os.path.join(ROOT, "opencode.log")
+                ok, msg = bot_core.handle_restart_opencode(log_path)
+                await send_text(room.room_id, f"OpenCode: {msg}")
+                return
             if body == "/opencode":
                 text = bot_core.handle_opencode_status()
                 if not bot_core.is_opencode_healthy():

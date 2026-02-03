@@ -24,6 +24,17 @@ python main.py
 
 **长任务超时**：发消息给 OpenCode 时，默认等待 10 分钟；超时后提示「请求超时（OpenCode 可能仍在执行）」。可设置环境变量 `OPENCODE_MESSAGE_TIMEOUT`（秒）增大超时；或设置 `OPENCODE_USE_ASYNC=1` 使用异步提交+轮询，避免单次长连接超时。
 
+## 开机自启（Linux systemd）
+
+在项目目录执行 `./setup.sh`，按提示选择：
+
+- **1** 安装/配置开机自启（创建 venv、安装依赖、检测 opencode、写入用户级 systemd 服务并 enable）
+- **2** 更新（git pull、更新依赖、重启服务）
+- **3** 删除开机自启并停止服务
+- **4** 退出
+
+未安装 opencode 时会提示使用：`curl -fsSL https://opencode.ai/install | bash`。若需在未登录时也开机自启，执行：`sudo loginctl enable-linger $USER`。
+
 ## 命令
 
 - `/start` 说明

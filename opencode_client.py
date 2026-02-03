@@ -6,11 +6,28 @@ OpenCode HTTP 客户端：健康检查、会话列表/创建、发消息。
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from typing import Optional, Tuple
 
 import httpx
+
+
+def _parse_json(r: httpx.Response) -> dict | list:
+    """解析响应为 JSON，若为空或非 JSON 则抛出带状态码和内容预览的异常。"""
+    text = (r.text or "").strip()
+    if not text:
+        raise ValueError(
+            f"OpenCode 返回空内容 (HTTP {r.status_code})，请确认服务已启动且地址正确: {_get_base_url()}"
+        )
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        preview = text[:200].replace("\n", " ")
+        raise ValueError(
+            f"OpenCode 返回非 JSON (HTTP {r.status_code})，内容预览: {preview}。错误: {e}"
+        ) from e
 
 DEFAULT_BASE_URL = "http://127.0.0.1:4096"
 
@@ -54,7 +71,7 @@ async def health() -> dict:
     ) as client:
         r = await client.get("/global/health")
         r.raise_for_status()
-        return r.json()
+        return _parse_json(r)
 
 
 async def list_sessions() -> list:
@@ -64,7 +81,7 @@ async def list_sessions() -> list:
     ) as client:
         r = await client.get("/session")
         r.raise_for_status()
-        return r.json()
+        return _parse_json(r)
 
 
 async def create_session(title: Optional[str] = None) -> dict:
@@ -74,7 +91,7 @@ async def create_session(title: Optional[str] = None) -> dict:
     ) as client:
         r = await client.post("/session", json={"title": title} if title else {})
         r.raise_for_status()
-        return r.json()
+        return _parse_json(r)
 
 
 async def _get_messages(session_id: str, limit: int = 5) -> list:
@@ -84,7 +101,7 @@ async def _get_messages(session_id: str, limit: int = 5) -> list:
     ) as client:
         r = await client.get(f"/session/{session_id}/message", params={"limit": limit})
         r.raise_for_status()
-        return r.json()
+        return _parse_json(r)
 
 
 async def get_session_messages(session_id: str, limit: int = 500) -> list:
@@ -136,5 +153,5 @@ async def send_message(session_id: str, text: str) -> str:
             json={"parts": [{"type": "text", "text": text}]},
         )
         r.raise_for_status()
-        data = r.json()
+        data = _parse_json(r)
         return _extract_final_result(data)

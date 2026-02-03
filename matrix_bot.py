@@ -26,8 +26,14 @@ CONFIG_PATH = os.path.join(ROOT, "config.json")
 
 
 def _load_config() -> dict:
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        raise SystemExit(
+            f"{CONFIG_PATH} 格式错误，第 {e.lineno} 行第 {e.colno} 列附近：{e.msg}。"
+            "请检查是否有多余逗号、注释（JSON 不支持 //）或未转义引号。"
+        ) from e
 
 
 def _save_config(config: dict) -> None:

@@ -5,9 +5,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 SERVICE_NAME="opencodebot"
-VENV_BIN="$SCRIPT_DIR/venv/bin"
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT_FILE="$UNIT_DIR/${SERVICE_NAME}.service"
+PYTHON="$(command -v python3)"
 
 echo "请选择操作:"
 echo "  1) 安装/配置开机自启（首次或重写 unit）"
@@ -19,14 +19,13 @@ echo ""
 
 case "$choice" in
     2)
-        [[ ! -d "$SCRIPT_DIR/venv" ]] && { echo "未找到 venv，请先选择 1 完成安装"; exit 1; }
         if [[ -d "$SCRIPT_DIR/.git" ]]; then
             echo "拉取代码 ..."
             git -C "$SCRIPT_DIR" pull
             echo ""
         fi
         echo "更新依赖并重启服务 ..."
-        "$VENV_BIN/pip" install -q -r requirements.txt
+        "$PYTHON" -m pip install -q --user -r requirements.txt
         systemctl --user daemon-reload
         systemctl --user restart "$SERVICE_NAME"
         systemctl --user status --no-pager "$SERVICE_NAME"
@@ -54,14 +53,11 @@ case "$choice" in
 esac
 
 echo "项目目录: $SCRIPT_DIR"
+[[ -z "$PYTHON" ]] && { echo "未找到 python3"; exit 1; }
 
-# 1. 检查/创建 venv 并安装依赖
-if [[ ! -d "venv" ]]; then
-    echo "创建虚拟环境 venv ..."
-    python3 -m venv venv
-fi
+# 1. 安装依赖（用户级，不创建 venv）
 echo "安装依赖 ..."
-"$VENV_BIN/pip" install -q -r requirements.txt
+"$PYTHON" -m pip install -q --user -r requirements.txt
 
 # 2. 检查 config
 if [[ ! -f "config.json" ]]; then
@@ -109,7 +105,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=$SCRIPT_DIR
 Environment=PATH=${OPENCODE_DIR}:${EXTRA_PATH}/usr/local/bin:/usr/bin:/bin
-ExecStart=$VENV_BIN/python $SCRIPT_DIR/main.py
+ExecStart=$PYTHON $SCRIPT_DIR/main.py
 Restart=on-failure
 RestartSec=10
 

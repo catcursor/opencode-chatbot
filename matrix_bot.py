@@ -136,23 +136,30 @@ async def _run_matrix(
             if allowed_room_ids and room.room_id not in allowed_room_ids:
                 logger.info("忽略未允许房间的消息，将 room_id 加入 config allowed_room_ids 可回复: %s", room.room_id)
                 return
-            body = getattr(event, "body", None) or getattr(event, "decrypted_body", None) or ""
-            body = (body or "").strip()
+            body_raw = getattr(event, "body", None) or getattr(event, "decrypted_body", None) or ""
+            body = (body_raw or "").strip()
             if not body:
                 return
+            body_for_cmd = bot_core.strip_leading_for_command(body)
 
-            if body == "/start":
+            if body_for_cmd == "/start":
                 await send_text(room.room_id, bot_core.handle_start())
                 return
-            if body in ("/session", "/sessions"):
+            if body_for_cmd in ("/session", "/sessions"):
                 text = await bot_core.handle_session_list()
                 await send_text(room.room_id, text)
                 return
-            if body == "/new":
+            if body_for_cmd == "/new":
                 text = await bot_core.handle_new_session()
                 await send_text(room.room_id, text)
                 return
-            if body == "/export":
+            if body_for_cmd.startswith("/newproj"):
+                subdir = body_for_cmd[8:].strip() or None
+                log_path = os.path.join(ROOT, "opencode.log")
+                text = await bot_core.handle_new_project(subdir=subdir, log_path=log_path)
+                await send_text(room.room_id, text)
+                return
+            if body_for_cmd == "/export":
                 content, filename = await bot_core.handle_export_session()
                 if content is not None:
                     ok = await send_file(room.room_id, content, filename)
@@ -161,12 +168,12 @@ async def _run_matrix(
                 else:
                     await send_text(room.room_id, filename)
                 return
-            if body == "/restart":
+            if body_for_cmd == "/restart":
                 log_path = os.path.join(ROOT, "opencode.log")
-                ok, msg = bot_core.handle_restart_opencode(log_path)
+                ok, msg = await bot_core.handle_restart_opencode(log_path)
                 await send_text(room.room_id, f"OpenCode: {msg}")
                 return
-            if body == "/opencode":
+            if body_for_cmd == "/opencode":
                 text = bot_core.handle_opencode_status()
                 if not bot_core.is_opencode_healthy():
                     log_path = os.path.join(ROOT, "opencode.log")
@@ -174,10 +181,13 @@ async def _run_matrix(
                     text = f"OpenCode: {msg}"
                 await send_text(room.room_id, text)
                 return
-            if body.startswith("/use "):
-                sid = body[5:].strip()
+            if body_for_cmd.startswith("/use "):
+                sid = body_for_cmd[5:].strip()
                 text = await bot_core.handle_switch_session(sid)
                 await send_text(room.room_id, text)
+                return
+            if body_for_cmd.startswith("/"):
+                await send_text(room.room_id, "命令不存在")
                 return
 
             pending_redact = None

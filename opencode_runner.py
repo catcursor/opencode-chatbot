@@ -7,6 +7,7 @@ import os
 import socket
 import subprocess
 import time
+from datetime import date
 from typing import Optional
 
 import httpx
@@ -107,18 +108,33 @@ def is_opencode_healthy() -> bool:
     return False
 
 
+def _default_cwd() -> str:
+    """默认工作目录：~/bots/年-月-日。可通过环境变量 OPENCODE_CWD 覆盖。"""
+    cwd = os.environ.get("OPENCODE_CWD", "").strip()
+    if cwd:
+        return os.path.abspath(os.path.expanduser(cwd))
+    return os.path.expanduser("~/bots/" + date.today().strftime("%Y-%m-%d"))
+
+
 def start_opencode(
     port: Optional[int] = None,
     hostname: Optional[str] = None,
     log_path: Optional[str] = None,
+    cwd: Optional[str] = None,
 ) -> tuple[bool, str]:
     """
     后台启动 opencode serve。返回 (是否成功, 说明信息)。
+    cwd 未传时使用 _default_cwd()（~/bots/年-月-日 或 OPENCODE_CWD）。
     """
     port = port or _parse_port_from_base_url(get_base_url())
     if port == 80:
         port = DEFAULT_PORT
     hostname = hostname or DEFAULT_HOST
+    work_dir = (os.path.abspath(os.path.expanduser(cwd)) if cwd else _default_cwd())
+    try:
+        os.makedirs(work_dir, exist_ok=True)
+    except OSError as e:
+        return False, f"无法创建目录 {work_dir}: {e}"
     args = list(OPENCODE_SERVE_CMD) + ["--port", str(port), "--hostname", hostname]
     env = os.environ.copy()
     try:
@@ -130,7 +146,7 @@ def start_opencode(
             stderr=err,
             env=env,
             start_new_session=True,
-            cwd=os.path.expanduser("~"),
+            cwd=work_dir,
         )
     except FileNotFoundError:
         return False, "未找到 opencode 命令，请确认已安装并在 PATH 中"
@@ -141,7 +157,7 @@ def start_opencode(
             out.close()
         except Exception:
             pass
-    return True, f"已启动 opencode serve (pid={p.pid}, {hostname}:{port})"
+    return True, f"已启动 opencode serve (pid={p.pid}, {hostname}:{port}, cwd={work_dir})"
 
 
 def _kill_port_process(port: int) -> bool:
@@ -168,9 +184,11 @@ def _kill_port_process(port: int) -> bool:
 def restart_opencode(
     port: Optional[int] = None,
     log_path: Optional[str] = None,
+    cwd: Optional[str] = None,
 ) -> tuple[bool, str]:
     """
     终止当前 OpenCode 进程并重新启动。返回 (是否成功, 说明)。
+    cwd 未传时使用 _default_cwd()。
     """
     port = port or _parse_port_from_base_url(get_base_url())
     if port == 80:
@@ -178,7 +196,7 @@ def restart_opencode(
     if not _kill_port_process(port):
         return False, f"无法终止端口 {port} 上的进程"
     time.sleep(1)
-    ok, msg = start_opencode(port=port, log_path=log_path)
+    ok, msg = start_opencode(port=port, log_path=log_path, cwd=cwd)
     if not ok:
         return False, msg
     for _ in range(15):
@@ -191,9 +209,11 @@ def restart_opencode(
 def ensure_opencode_running(
     port: Optional[int] = None,
     log_path: Optional[str] = None,
+    cwd: Optional[str] = None,
 ) -> tuple[bool, str]:
     """
     若 OpenCode 未健康则尝试启动。返回 (是否可用, 说明)。
+    cwd 未传时使用 _default_cwd()。
     """
     if is_opencode_healthy():
         return True, "OpenCode 已在运行"
@@ -205,7 +225,7 @@ def ensure_opencode_running(
         return False, f"端口 {port} 已被占用 (pid={pid}, {cmd or '?'})，但非 OpenCode"
     if in_use:
         return True, "OpenCode 已在运行"
-    ok, msg = start_opencode(port=port, log_path=log_path)
+    ok, msg = start_opencode(port=port, log_path=log_path, cwd=cwd)
     if not ok:
         return False, msg
     for _ in range(10):

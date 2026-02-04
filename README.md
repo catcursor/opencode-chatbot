@@ -37,11 +37,17 @@ python main.py
 
 ## 命令
 
-- `/start` 说明
+首字符为 `/` 会当作命令处理（会先去掉首部空格与不可见字符再判断）；未知命令回复「命令不存在」，不会当普通内容发给 OpenCode。
+
+- `/start` 说明与欢迎
 - `/session` 会话列表（Telegram 可点按钮切换；Matrix 用 `/use <session_id>` 切换）
-- `/new` 新建会话
+- `/new` 新建会话（不换目录、不重启）
+- `/newproj` 新建项目目录：用**日期目录** `~/bots/年-月-日` 重启 OpenCode 并新建会话
+- `/newproj <名>` 新建项目目录：用 `~/bots/<名>` 重启并新建会话（`<名>` 仅允许可见字符、无路径符号，1～64 字）
 - `/export` 导出当前会话全部内容为 .md 文件
-- `/restart` 重启 OpenCode（终止进程后重新启动）
+- `/restart` 用**上次使用的目录**重启 OpenCode，并自动选该目录下最近的会话
 - `/opencode` 查看/启动 OpenCode
 - `/use <session_id>`（Matrix）切换当前会话
+
+**目录**：首次启动或未设置时使用 `~/bots/年-月-日`；可通过环境变量 `OPENCODE_CWD` 覆盖默认目录。`/newproj` 或 `/newproj <名>` 会记录「上次目录」，`/restart` 会回到该目录。
 

@@ -82,6 +82,13 @@ async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(text)
 
 
+async def cmd_newproj(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    subdir = " ".join(context.args).strip() if context.args else None
+    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "opencode.log")
+    text = await bot_core.handle_new_project(subdir=subdir, log_path=log_path)
+    await update.message.reply_text(text)
+
+
 async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     content, filename = await bot_core.handle_export_session()
     if content is not None:
@@ -92,7 +99,7 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def cmd_restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "opencode.log")
-    ok, msg = bot_core.handle_restart_opencode(log_path)
+    ok, msg = await bot_core.handle_restart_opencode(log_path)
     await update.message.reply_text(f"OpenCode: {msg}")
 
 
@@ -122,11 +129,15 @@ async def on_start_opencode(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
-    text = update.message.text.strip()
-    if not text:
+    raw = (update.message.text or "").strip()
+    text_for_cmd = bot_core.strip_leading_for_command(raw)
+    if not raw:
+        return
+    if text_for_cmd.startswith("/"):
+        await update.message.reply_text("命令不存在")
         return
     received_msg = await update.message.reply_text("已收到，正在执行…")
-    result = await bot_core.handle_message(text)
+    result = await bot_core.handle_message(raw)
     try:
         await received_msg.delete()
     except Exception:
@@ -148,6 +159,7 @@ def run_telegram(config: dict) -> None:
         BotCommand("start", "欢迎与说明"),
         BotCommand("session", "查看会话列表"),
         BotCommand("new", "新建会话"),
+        BotCommand("newproj", "新建项目目录（可选参数为子目录名）"),
         BotCommand("export", "导出当前会话为 .md 文件"),
         BotCommand("restart", "重启 OpenCode"),
         BotCommand("opencode", "查看并启动 OpenCode"),
@@ -162,6 +174,7 @@ def run_telegram(config: dict) -> None:
     app.add_handler(CommandHandler("session", cmd_session, filters=allow))
     app.add_handler(CommandHandler("sessions", cmd_session, filters=allow))
     app.add_handler(CommandHandler("new", cmd_new, filters=allow))
+    app.add_handler(CommandHandler("newproj", cmd_newproj, filters=allow))
     app.add_handler(CommandHandler("export", cmd_export, filters=allow))
     app.add_handler(CommandHandler("restart", cmd_restart, filters=allow))
     app.add_handler(CommandHandler("opencode", cmd_opencode, filters=allow))

@@ -8,6 +8,7 @@ import logging
 import os
 import threading
 
+import bot_core
 import opencode_runner as runner
 
 logging.basicConfig(
@@ -24,6 +25,8 @@ def main() -> None:
     config = load_config()
     root = os.path.dirname(os.path.abspath(__file__))
     ok, msg = runner.ensure_opencode_running(log_path=os.path.join(root, "opencode.log"))
+    if ok:
+        bot_core.set_last_opencode_cwd(runner._default_cwd())
     logger.info("OpenCode: %s", msg)
 
     has_telegram = bool(config.get("telegram_token"))

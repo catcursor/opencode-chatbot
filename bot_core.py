@@ -11,6 +11,7 @@ import opencode_runner as runner
 
 MAX_MESSAGE_LENGTH = 4096
 current_session_id: str | None = None
+_last_opencode_cwd: str | None = None  # 上次启动/重启 opencode 时使用的目录，/restart 时用其恢复
 
 
 async def get_or_create_session() -> str:
@@ -36,6 +37,20 @@ async def get_or_create_session() -> str:
 def switch_session(session_id: str) -> None:
     global current_session_id
     current_session_id = session_id
+
+
+def set_last_opencode_cwd(cwd: str) -> None:
+    """记录上次启动 opencode 的目录，供 /restart 使用。"""
+    global _last_opencode_cwd
+    _last_opencode_cwd = cwd
+
+
+def strip_leading_for_command(s: str) -> str:
+    """去掉首位的空格与不可见字符，用于判断首个可见字符是否为 /。"""
+    s = (s or "").lstrip()
+    while s and not s[0].isprintable():
+        s = s[1:]
+    return s
 
 
 def chunk_text(text: str, size: int = MAX_MESSAGE_LENGTH) -> list[str]:
@@ -85,7 +100,7 @@ async def handle_export_session() -> tuple[bytes | None, str]:
 def handle_start() -> str:
     return (
         "直接发消息即会转发给 OpenCode 执行，仅回复最终结果。"
-        " /session 查看会话并可点击按钮切换，/new 新建会话，/opencode 查看并启动 OpenCode。"
+        " /session 查看会话，/new 新建会话，/newproj 新建项目目录，/opencode 查看并启动 OpenCode。"
     )
 
 
@@ -105,12 +120,54 @@ async def handle_session_list() -> str:
     return "会话列表（点击下方按钮切换当前会话）:\n" + "\n".join(lines)
 
 
+def _validate_proj_subdir(name: str) -> str | None:
+    """校验 /newproj xxxx 的 xxxx：仅允许可见字符、无路径成分。返回错误说明或 None 表示通过。"""
+    if not name or len(name) > 64:
+        return "子目录名长度须 1～64"
+    for c in name:
+        if c in "/\\\0\t\n\r" or ord(c) < 32:
+            return "子目录名不可含不可见字符或路径符号"
+    if name.startswith(".") or ".." in name:
+        return "子目录名不可含 .. 或以 . 开头"
+    return None
+
+
 async def handle_new_session() -> str:
+    """/new：仅新建 session，不重启。"""
     global current_session_id
     try:
         session = await opencode.create_session()
         current_session_id = session["id"]
         return "已切换到新会话。"
+    except Exception as e:
+        return f"创建会话失败: {e}"
+
+
+async def handle_new_project(
+    subdir: str | None = None,
+    log_path: str | None = None,
+) -> str:
+    """
+    /newproj：用日期目录 ~/bots/年-月-日 重启并新建 session。
+    /newproj xxxx：用 ~/bots/xxxx 重启并新建 session。
+    """
+    global current_session_id, _last_opencode_cwd
+    if subdir is not None:
+        err = _validate_proj_subdir(subdir)
+        if err:
+            return err
+        cwd = os.path.expanduser("~/bots/" + subdir.strip())
+    else:
+        cwd = runner._default_cwd()
+    ok, msg = runner.restart_opencode(log_path=log_path, cwd=cwd)
+    if not ok:
+        return f"重启 OpenCode 失败: {msg}"
+    _last_opencode_cwd = cwd
+    current_session_id = None
+    try:
+        session = await opencode.create_session()
+        current_session_id = session["id"]
+        return f"已切换到新项目目录并新建会话: {cwd}"
     except Exception as e:
         return f"创建会话失败: {e}"
 
@@ -139,12 +196,33 @@ def is_opencode_healthy() -> bool:
 
 
 def handle_start_opencode(log_path: str) -> tuple[bool, str]:
-    return runner.ensure_opencode_running(log_path=log_path)
+    global _last_opencode_cwd
+    ok, msg = runner.ensure_opencode_running(log_path=log_path)
+    if ok and _last_opencode_cwd is None:
+        _last_opencode_cwd = runner._default_cwd()
+    return ok, msg
 
 
-def handle_restart_opencode(log_path: str) -> tuple[bool, str]:
-    """终止当前 OpenCode 进程并重新启动。"""
-    return runner.restart_opencode(log_path=log_path)
+async def handle_restart_opencode(log_path: str) -> tuple[bool, str]:
+    """用上次的目录重启 OpenCode，并将当前 session 设为该目录下最近的一个。"""
+    global current_session_id, _last_opencode_cwd
+    cwd = _last_opencode_cwd or runner._default_cwd()
+    _last_opencode_cwd = cwd
+    ok, msg = runner.restart_opencode(log_path=log_path, cwd=cwd)
+    if not ok:
+        return ok, msg
+    current_session_id = None
+    try:
+        sessions = await opencode.list_sessions()
+        if sessions:
+            def sort_key(s: dict) -> tuple:
+                t = s.get("time") or ""
+                return (1 if t else 0, t)
+            sessions = sorted(sessions, key=sort_key, reverse=True)
+            current_session_id = sessions[0].get("id")
+    except Exception:
+        pass
+    return ok, msg
 
 
 async def handle_switch_session(session_id: str) -> str:

@@ -137,13 +137,14 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("命令不存在")
         return
     received_msg = await update.message.reply_text("已收到，正在执行…")
-    result = await bot_core.handle_message(raw)
+    results = await bot_core.handle_message(raw)
     try:
         await received_msg.delete()
     except Exception:
         pass
-    for chunk in bot_core.chunk_text(result):
-        await update.message.reply_text(chunk)
+    for result in results:
+        for chunk in bot_core.chunk_text(result):
+            await update.message.reply_text(chunk)
 
 
 def run_telegram(config: dict) -> None:

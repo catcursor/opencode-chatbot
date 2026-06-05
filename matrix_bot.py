@@ -91,6 +91,7 @@ async def _run_matrix(
     client = AsyncClient(homeserver, user_id, device_id=device_id, store_path=STORE_PATH, config=config)
     client.restore_login(user_id, device_id, access_token)
     start_ts_ms = int(time.time() * 1000)
+    background_tasks: set[asyncio.Task] = set()
 
     def is_old_event(event) -> bool:
         """仅处理启动后的消息，避免对历史记录全部回复。"""
@@ -123,6 +124,28 @@ async def _run_matrix(
             ignore_unverified_devices=True,
         )
         return True
+
+    async def handle_user_request(room_id: str, body: str, pending_redact: tuple[str, str] | None) -> None:
+        try:
+            results = await bot_core.handle_message(body)
+            if pending_redact:
+                try:
+                    await client.room_redact(pending_redact[0], pending_redact[1])
+                except Exception:
+                    pass
+            for result in results:
+                await send_text(room_id, result)
+        except Exception as e:
+            logger.exception("处理 OpenCode 请求失败: %s", e)
+            try:
+                await send_text(room_id, f"错误: {e}")
+            except Exception:
+                pass
+
+    def run_background(coro) -> None:
+        task = asyncio.create_task(coro)
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
 
     async def on_message(room, event):
         try:
@@ -199,13 +222,7 @@ async def _run_matrix(
             )
             if isinstance(resp, RoomSendResponse):
                 pending_redact = (room.room_id, resp.event_id)
-            result = await bot_core.handle_message(body)
-            if pending_redact:
-                try:
-                    await client.room_redact(pending_redact[0], pending_redact[1])
-                except Exception:
-                    pass
-            await send_text(room.room_id, result)
+            run_background(handle_user_request(room.room_id, body, pending_redact))
         except Exception as e:
             logger.exception("处理 Matrix 消息失败: %s", e)
             try:
@@ -301,6 +318,10 @@ async def _run_matrix(
                 logger.exception("matrix sync: %s", e)
                 await asyncio.sleep(5)
     finally:
+        for task in list(background_tasks):
+            task.cancel()
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
         await client.close()
 
 

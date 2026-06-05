@@ -239,12 +239,15 @@ async def handle_switch_session(session_id: str) -> str:
         return f"切换失败: {e}"
 
 
-async def handle_message(text: str) -> str:
+async def handle_message(text: str) -> list[str]:
     try:
         session_id = await get_or_create_session()
         result = await opencode.send_message(session_id, text)
     except httpx.TimeoutException:
-        return "请求超时（OpenCode 可能仍在执行），可稍后重试或发 /session 查看。可设置环境变量 OPENCODE_MESSAGE_TIMEOUT（秒）增大超时。"
+        return [
+            "请求超时（OpenCode 可能仍在执行），可稍后重试或发 /session 查看。"
+            "可设置环境变量 OPENCODE_MESSAGE_TIMEOUT（秒）增大超时。"
+        ]
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             global current_session_id
@@ -253,13 +256,9 @@ async def handle_message(text: str) -> str:
                 session_id = await get_or_create_session()
                 result = await opencode.send_message(session_id, text)
             except Exception as retry_e:
-                return f"调用 OpenCode 失败: {retry_e}"
-            if not result:
-                return "(无文本结果)"
-            return result
-        return f"调用 OpenCode 失败: {e}"
+                return [f"调用 OpenCode 失败: {retry_e}"]
+            return result or ["(无文本结果)"]
+        return [f"调用 OpenCode 失败: {e}"]
     except Exception as e:
-        return f"调用 OpenCode 失败: {e}"
-    if not result:
-        return "(无文本结果)"
-    return result
+        return [f"调用 OpenCode 失败: {e}"]
+    return result or ["(无文本结果)"]

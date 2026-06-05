@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 *.log
 *.json
+.venv/
 matrix_store/
